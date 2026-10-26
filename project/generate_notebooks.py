@@ -1,9 +1,10 @@
 """
-Generator script to produce clean, well-documented Jupyter Notebooks for:
+Generator script to produce clean, well-documented Jupyter Notebooks strictly focused on
+Image Detection / Classification (identifying which class an image belongs to: apples, dogs, people).
 1. 1_hog.ipynb
 2. 2_sift.ipynb
 3. 3_freak.ipynb
-4. 4_comparison_and_detection.ipynb
+4. 4_comparison.ipynb
 """
 
 import json
@@ -59,134 +60,119 @@ def code_cell(code):
 # Notebook 1: HOG
 # ==============================================================================
 hog_cells = [
-    md_cell("""# 1. Histogram of Oriented Gradients (HOG) & SVM Pipeline
-### Improved Object Identification and Detection
+    md_cell("""# 1. HOG (Histogram of Oriented Gradients) para Clasificación de Imágenes
+### Clasificación de Categorías de Imágenes: Manzanas, Perros y Personas
 
-This notebook addresses and fixes the key limitations found in the original `mine/hog.ipynb`:
-1. **Missing Classes**: Fixed the `.jpeg` file glob bug that previously omitted all **164 training apples** and **54 test apples**.
-2. **Dimension & Model Explosion**: Replaced the huge `(512, 512)` window size (which generated **142,884 features** and a **628 MB** SVM model!) with a standardized `(128, 128)` window (8,100 features, ~39 MB model, fast training and inference).
-3. **Rigorous Test Evaluation**: Added systematic test evaluation on the full test set with **Accuracy**, **Precision**, **Recall**, **F1-score**, and a **Confusion Matrix**.
-4. **Object Detection**: Implemented multiscale sliding-window detection with **Non-Maximum Suppression (NMS)** to draw localized bounding boxes around detected objects.
+Este cuaderno implementa la solución completa de **Image Detection / Classification** utilizando el descriptor **HOG** y un clasificador **SVM** con OpenCV:
+- **Entrada**: Una imagen cualquiera.
+- **Salida**: La clase predicha a la que pertenece la imagen (`apples`, `dogs` o `people`).
+
+#### Correcciones clave respecto al trabajo previo en `mine/hog.ipynb`:
+1. **Soporte de extensiones `.jpeg`**: El código original ignoraba las imágenes `.jpeg`, omitiendo el 100% de las manzanas (164 de train y 54 de test). Aquí se cargan todas las imágenes dinámicamente.
+2. **Dimensionamiento óptimo de ventana**: Se sustituye la ventana de $512 \\times 512$ (que producía 142,884 dimensiones y un modelo de 628 MB) por una ventana de $128 \\times 128$ (8,100 dimensiones, modelo de 39 MB, entrenamiento instantáneo).
+3. **Evaluación completa en el conjunto de prueba**: Cálculo de exactitud, reporte de clasificación por clase y matriz de confusión.
 """),
 
     code_cell("""import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
-from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
 
 from dataset import load_split
-from hog_pipeline import HOGPipeline, non_max_suppression_fast
+from hog_pipeline import HOGPipeline
 
-def show_rgb(img, title=None):
-    if len(img.shape) == 3:
-        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    else:
-        img_rgb = img
-    plt.figure(figsize=(6, 6))
-    plt.imshow(img_rgb, cmap='gray' if len(img.shape) == 2 else None)
+def show_image(img, title=None):
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) if len(img.shape) == 3 else img
+    plt.figure(figsize=(5, 5))
+    plt.imshow(img_rgb)
     plt.axis('off')
     if title:
-        plt.title(title, fontsize=12)
+        plt.title(title, fontsize=12, fontweight='bold')
     plt.show()
 """),
 
-    md_cell("""## Step 1: Load Dataset (with .jpeg support)
-Notice that the dataset contains `apples`, `dogs`, and `people`. All 3 classes are loaded dynamically.
-"""),
+    md_cell("""## Paso 1: Carga de Datos de Entrenamiento y Prueba"""),
 
-    code_cell("""# Load train and test splits
-train_imgs, train_lbls, classes, _ = load_split("train")
+    code_cell("""train_imgs, train_lbls, classes, _ = load_split("train")
 test_imgs, test_lbls, _, _ = load_split("test")
 
-print(f"Classes Discovered: {classes}")
-print(f"Training set: {len(train_imgs)} images")
-print(f"Testing set:  {len(test_imgs)} images")
+print(f"Clases detectadas: {classes}")
+print(f"Muestras de entrenamiento: {len(train_imgs)}")
+print(f"Muestras de prueba:        {len(test_imgs)}")
 
 for c in classes:
     print(f"  - {c}: {train_lbls.count(c)} train, {test_lbls.count(c)} test")
 """),
 
-    md_cell("""## Step 2: Configure HOG Descriptor
-We use:
-- `win_size = (128, 128)`
-- `block_size = (16, 16)`
-- `block_stride = (8, 8)`
-- `cell_size = (8, 8)`
-- `nbins = 9`
-
-Feature Dimension = $((128-16)/8 + 1) \\times ((128-16)/8 + 1) \\times 4 \\times 9 = 15 \\times 15 \\times 36 = 8,100$.
+    md_cell("""## Paso 2: Configuración del Descriptor HOG
+Ventana: `(128, 128)`, Bloque: `(16, 16)`, Paso de bloque: `(8, 8)`, Celda: `(8, 8)`, Contenedores: `9`.
+Dimensión resultante: $15 \\times 15 \\times 36 = 8,100$ características.
 """),
 
     code_cell("""pipeline = HOGPipeline(win_size=(128, 128))
 sample_des = pipeline.compute_descriptor(train_imgs[0])
-print(f"HOG Descriptor dimension per image: {sample_des.shape[0]} features")
+print(f"Dimensión del descriptor HOG por imagen: {sample_des.shape[0]} características flotantes")
 """),
 
-    md_cell("""## Step 3: Train SVM Classifier
-We train OpenCV's SVM (`cv2.ml.SVM`) with a Linear kernel.
+    md_cell("""## Paso 3: Entrenamiento del Clasificador SVM
+Entrenamos la SVM de OpenCV (`cv2.ml.SVM`) con kernel lineal para clasificar las imágenes.
 """),
 
-    code_cell("""print("Training HOG + SVM on training set...")
+    code_cell("""print("Entrenando clasificador HOG + SVM...")
 train_info = pipeline.train(train_imgs, train_lbls, kernel_type="linear", C=1.0)
-print(f"Training completed in {train_info['train_time_sec']:.2f} seconds!")
-print(f"Feature dimension: {train_info['feature_dim']}")
+print(f"Entrenamiento completado en {train_info['train_time_sec']:.2f} segundos!")
 """),
 
-    md_cell("""## Step 4: Evaluate on Full Test Set
-We evaluate accuracy, per-class precision/recall, and the confusion matrix on all 140 test images.
+    md_cell("""## Paso 4: Evaluación en el Conjunto de Prueba
+Evaluamos la exactitud, precisión, recall y matriz de confusión en las 140 imágenes de prueba.
 """),
 
     code_cell("""eval_results = pipeline.evaluate(test_imgs, test_lbls)
-print(f"HOG Test Accuracy: {eval_results['accuracy'] * 100:.2f}%\n")
-print("Classification Report:")
+print(f"Exactitud en Prueba (Accuracy): {eval_results['accuracy'] * 100:.2f}%\n")
+print("Reporte de Clasificación por Clase:")
 print(classification_report(test_lbls, eval_results['predictions'], target_names=pipeline.classes_))
 
-# Plot Confusion Matrix
+# Matriz de confusión
 cm = np.array(eval_results["confusion_matrix"])
 fig, ax = plt.subplots(figsize=(6, 5))
 im = ax.imshow(cm, cmap="Blues")
 ax.set_xticks(range(len(classes)))
 ax.set_yticks(range(len(classes)))
-ax.set_xticklabels(classes)
-ax.set_yticklabels(classes)
-plt.xlabel("Predicted Class")
-plt.ylabel("True Class")
-plt.title("HOG Confusion Matrix")
+ax.set_xticklabels(classes, fontsize=11)
+ax.set_yticklabels(classes, fontsize=11)
+plt.xlabel("Clase Predicha", fontsize=11)
+plt.ylabel("Clase Real", fontsize=11)
+plt.title("Matriz de Confusión HOG + SVM", fontsize=12, fontweight='bold')
 for i in range(len(classes)):
     for j in range(len(classes)):
-        ax.text(j, i, str(cm[i, j]), ha="center", va="center", color="red" if i != j else "black")
+        ax.text(j, i, str(cm[i, j]), ha="center", va="center", color="red" if i != j else "black", fontweight='bold')
 plt.colorbar(im)
+plt.tight_layout()
 plt.show()
 """),
 
-    md_cell("""## Step 5: Save Model & Verify File Footprint
-The model is saved to `hog_svm_model.yml`. Notice how compact it is compared to the original 628 MB model!
+    md_cell("""## Paso 5: Demostración de Clasificación en Imágenes Individuales
+Dada una imagen de entrada, el modelo predice directamente su clase semántica.
 """),
+
+    code_cell("""import random
+
+# Seleccionamos muestras aleatorias de prueba
+for _ in range(3):
+    idx = random.randrange(len(test_imgs))
+    img = test_imgs[idx]
+    true_label = test_lbls[idx]
+    
+    pred_label, _ = pipeline.predict([img])
+    show_image(img, title=f"Real: {true_label.upper()} | Predicción HOG: {pred_label[0].upper()}")
+"""),
+
+    md_cell("""## Paso 6: Guardado del Modelo"""),
 
     code_cell("""pipeline.save_model("hog_svm_model.yml")
 model_size_mb = Path("hog_svm_model.yml").stat().st_size / (1024 * 1024)
-print(f"Saved HOG SVM Model: hog_svm_model.yml")
-print(f"Model File Size:     {model_size_mb:.2f} MB")
-"""),
-
-    md_cell("""## Step 6: Object Detection in Scenes (Sliding Window & Bounding Box)
-We can scan sliding windows over a scene image to detect and localize objects.
-"""),
-
-    code_cell("""# Test sliding-window detector on an apple test image
-test_scene = test_imgs[0].copy()
-detections = pipeline.detect_multiscale(test_scene, min_win=(64, 64), max_win=(160, 160), step_size=16)
-
-annotated = test_scene.copy()
-for det in detections:
-    x1, y1, x2, y2 = det['box']
-    cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
-    cv2.putText(annotated, f"{det['class']}: {det['score']:.1f}", (x1, y1 - 6),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-
-show_rgb(annotated, title=f"HOG Multiscale Detections ({len(detections)} found)")
+print(f"Modelo guardado: hog_svm_model.yml ({model_size_mb:.2f} MB)")
 """)
 ]
 
@@ -195,14 +181,19 @@ show_rgb(annotated, title=f"HOG Multiscale Detections ({len(detections)} found)"
 # Notebook 2: SIFT
 # ==============================================================================
 sift_cells = [
-    md_cell("""# 2. SIFT (Scale-Invariant Feature Transform) Pipeline
-### Category Identification (BoVW) & Pairwise Object Detection (Homography)
+    md_cell("""# 2. SIFT (Scale-Invariant Feature Transform) con Bolsa de Palabras Visuales (BoVW)
+### Clasificación de Categorías de Imágenes: Manzanas, Perros y Personas
 
-This notebook addresses and fixes the bugs and limitations in `mine/sift.ipynb`:
-1. **Critical Bug Fixed**: In `mine/sift.ipynb` Cell 9, test descriptors were appended to `train_kps` (`train_kps.append(item_kp)`), corrupting the training array and leaving `test_kps` empty.
-2. **Re-assignment Bug Fixed**: In Cell 7, `bf.knnMatch` result was not stored, causing the loop to use obsolete matches.
-3. **Bag of Visual Words (BoVW)**: Brute-force 1-NN pairwise template matching across 500 images is slow and fails for intra-class variation. We implement **BoVW** (visual codebook clustering + SVM) for robust category identification.
-4. **Spatial Object Detection**: For detecting specific object instances, we implement **Lowe's Ratio Test + RANSAC Homography + Bounding Box Projection**.
+Este cuaderno implementa la solución completa de **Image Detection / Classification** utilizando **SIFT** y el modelo de **Bolsa de Palabras Visuales (Bag of Visual Words - BoVW)**:
+- **Entrada**: Una imagen cualquiera.
+- **Salida**: La clase predicha a la que pertenece la imagen (`apples`, `dogs` o `people`).
+
+#### ¿Por qué Bolsa de Palabras Visuales (BoVW) para clasificar imágenes?
+SIFT extrae un número variable de puntos clave locales por imagen (descriptores de 128 dimensiones). Como distintas imágenes de una misma clase no comparten puntos en las mismas posiciones espaciales, no se pueden comparar directamente fila por fila.
+Con BoVW:
+1. Agrupamos los descriptores de entrenamiento con K-Means para crear un **vocabulario visual** (diccionario de palabras visuales).
+2. Cuantizamos cada imagen en un **histograma de frecuencias de palabras visuales**, produciendo un vector de longitud fija ($k = 150$) normalizado en norma $L_2$.
+3. Entrenamos un clasificador SVM para predecir la clase de cualquier imagen.
 """),
 
     code_cell("""import cv2
@@ -212,110 +203,86 @@ from pathlib import Path
 from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
 
 from dataset import load_split
-from sift_pipeline import SIFTBoVWPipeline, SIFTFeatureMatcher
+from sift_pipeline import SIFTBoVWPipeline
 
-def show_rgb(img, title=None):
-    if len(img.shape) == 3:
-        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    else:
-        img_rgb = img
-    plt.figure(figsize=(7, 7))
+def show_image(img, title=None):
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) if len(img.shape) == 3 else img
+    plt.figure(figsize=(5, 5))
     plt.imshow(img_rgb)
     plt.axis('off')
     if title:
-        plt.title(title, fontsize=12)
+        plt.title(title, fontsize=12, fontweight='bold')
     plt.show()
 """),
 
-    md_cell("""## Step 1: Load Data & Visualize SIFT Keypoints"""),
+    md_cell("""## Paso 1: Carga de Datos y Visualización de Puntos Clave SIFT"""),
 
     code_cell("""train_imgs, train_lbls, classes, _ = load_split("train")
 test_imgs, test_lbls, _, _ = load_split("test")
 
-sift = cv2.SIFT_create(nfeatures=500)
+sift = cv2.SIFT_create(nfeatures=400)
 sample_img = train_imgs[0]
 gray = cv2.cvtColor(sample_img, cv2.COLOR_BGR2GRAY)
 kps, descs = sift.detectAndCompute(gray, None)
 
 img_kps = cv2.drawKeypoints(sample_img, kps, None, flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
-show_rgb(img_kps, title=f"SIFT Rich Keypoints (Detected: {len(kps)})")
+show_image(img_kps, title=f"SIFT: Puntos Clave Multi-Escala ({len(kps)} puntos detectados)")
 """),
 
-    md_cell("""## Step 2: Method A - Bag of Visual Words (BoVW) for Object Identification
-1. Extract SIFT descriptors across the training set.
-2. Cluster descriptors using KMeans into a visual codebook (e.g. 150 visual words).
-3. Build normalized visual word frequency histograms.
-4. Train an SVM classifier.
-"""),
+    md_cell("""## Paso 2: Creación del Vocabulario Visual y Entrenamiento del Clasificador BoVW"""),
 
     code_cell("""bovw_pipeline = SIFTBoVWPipeline(nfeatures=400, vocab_size=150)
-print("Training SIFT BoVW Pipeline...")
+print("Construyendo vocabulario visual con K-Means y entrenando clasificador SVM...")
 train_info = bovw_pipeline.train(train_imgs, train_lbls, C=1.0)
-print(f"Trained visual codebook and SVM in {train_info['train_time_sec']:.2f} seconds!")
+print(f"Entrenamiento completado en {train_info['train_time_sec']:.2f} segundos!")
+print(f"Vocabulario visual: {train_info['vocab_size']} palabras visuales")
 """),
 
-    md_cell("""## Step 3: Evaluate SIFT BoVW on Test Set"""),
+    md_cell("""## Paso 3: Evaluación en el Conjunto de Prueba"""),
 
     code_cell("""eval_res = bovw_pipeline.evaluate(test_imgs, test_lbls)
-print(f"SIFT BoVW Test Accuracy: {eval_res['accuracy'] * 100:.2f}%")
-print(f"Average Inference Latency: {eval_res['avg_time_per_image_ms']:.2f} ms/image\n")
+print(f"Exactitud en Prueba SIFT BoVW (Accuracy): {eval_res['accuracy'] * 100:.2f}%")
+print(f"Latencia promedio por imagen:            {eval_res['avg_time_per_image_ms']:.2f} ms/imagen\n")
+print("Reporte de Clasificación por Clase:")
 print(classification_report(test_lbls, eval_res['predictions'], target_names=bovw_pipeline.classes_))
 
-# Plot confusion matrix
+# Matriz de confusión
 cm = np.array(eval_res["confusion_matrix"])
 fig, ax = plt.subplots(figsize=(6, 5))
 im = ax.imshow(cm, cmap="Purples")
 ax.set_xticks(range(len(classes)))
 ax.set_yticks(range(len(classes)))
-ax.set_xticklabels(classes)
-ax.set_yticklabels(classes)
-plt.xlabel("Predicted Class")
-plt.ylabel("True Class")
-plt.title("SIFT BoVW Confusion Matrix")
+ax.set_xticklabels(classes, fontsize=11)
+ax.set_yticklabels(classes, fontsize=11)
+plt.xlabel("Clase Predicha", fontsize=11)
+plt.ylabel("Clase Real", fontsize=11)
+plt.title("Matriz de Confusión SIFT + BoVW", fontsize=12, fontweight='bold')
 for i in range(len(classes)):
     for j in range(len(classes)):
-        ax.text(j, i, str(cm[i, j]), ha="center", va="center", color="red" if i != j else "black")
+        ax.text(j, i, str(cm[i, j]), ha="center", va="center", color="red" if i != j else "black", fontweight='bold')
 plt.colorbar(im)
+plt.tight_layout()
 plt.show()
 """),
 
-    md_cell("""## Step 4: Method B - Pairwise Feature Matching & Homography Object Detection
-When detecting a specific template or tracking an object across frames:
-1. Match keypoints with `cv2.BFMatcher(cv2.NORM_L2)`.
-2. Apply Lowe's ratio test (`m.distance < 0.75 * n.distance`).
-3. Compute geometric transformation using RANSAC Homography (`cv2.findHomography`).
-4. Project bounding box corners (`cv2.perspectiveTransform`) to localize the object!
-"""),
+    md_cell("""## Paso 4: Demostración de Clasificación en Imágenes Individuales"""),
 
-    code_cell("""matcher = SIFTFeatureMatcher(nfeatures=500, ratio_thresh=0.75)
+    code_cell("""import random
 
-# Test matching between two consecutive video frames from train/people
-f0 = cv2.imread("../data/train/people/02022_0954.MOV_Bielsko-Biała_Pride_frame_000.jpg")
-f1 = cv2.imread("../data/train/people/02022_0954.MOV_Bielsko-Biała_Pride_frame_001.jpg")
-
-loc_res = matcher.localize_object(f0, f1, min_inliers=10)
-print(f"Matches: {loc_res['num_matches']} | Verified Inliers: {loc_res['num_inliers']} | Object Detected: {loc_res['detected']}")
-
-# Draw matched keypoints and projected bounding box
-if loc_res['detected']:
-    scene_annotated = f1.copy()
-    pts = np.int32(loc_res['dst_corners']).reshape(-1, 1, 2)
-    cv2.polylines(scene_annotated, [pts], True, (0, 255, 0), 4, cv2.LINE_AA)
+for _ in range(3):
+    idx = random.randrange(len(test_imgs))
+    img = test_imgs[idx]
+    true_label = test_lbls[idx]
     
-    matches_img = cv2.drawMatches(
-        f0, loc_res['kp_template'],
-        scene_annotated, loc_res['kp_scene'],
-        loc_res['good_matches'][:30], None,
-        flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS
-    )
-    show_rgb(matches_img, title=f"SIFT Keypoint Matching & Object Localization ({loc_res['num_inliers']} Inliers)")
+    pred_label = bovw_pipeline.predict([img])[0]
+    show_image(img, title=f"Real: {true_label.upper()} | Predicción SIFT: {pred_label.upper()}")
 """),
 
-    md_cell("""## Step 5: Save Model"""),
+    md_cell("""## Paso 5: Guardado del Modelo"""),
 
     code_cell("""bovw_pipeline.save_model("sift_bovw_model.pkl")
 sz = Path("sift_bovw_model.pkl").stat().st_size / (1024 * 1024)
-print(f"Saved SIFT Model to sift_bovw_model.pkl ({sz:.2f} MB)")
+print(f"Modelo guardado: sift_bovw_model.pkl ({sz:.2f} MB)")
 """)
 ]
 
@@ -324,15 +291,18 @@ print(f"Saved SIFT Model to sift_bovw_model.pkl ({sz:.2f} MB)")
 # Notebook 3: FREAK
 # ==============================================================================
 freak_cells = [
-    md_cell("""# 3. FREAK (Fast Retina Keypoint) Pipeline
-### Bio-Inspired Binary Descriptor for Object Identification & Detection
+    md_cell("""# 3. FREAK (Fast Retina Keypoint) con Bolsa de Palabras Visuales (BoVW)
+### Clasificación de Categorías de Imágenes: Manzanas, Perros y Personas
 
-### What is FREAK?
-**FREAK** (*Fast Retina Keypoint*) was introduced by Alahi et al. (CVPR 2012). It is a fast, robust **binary** descriptor inspired by the human visual system:
-- **Retinal Sampling Grid**: Mimics the distribution of photoreceptors in the human retina (fovea), with a high density of receptive fields near the center and decreasing density toward the periphery.
-- **Binary Descriptor**: 64 bytes (512 bits) of intensity difference tests, comparing pairs of retinal receptive fields.
-- **Detector-Free Extractor**: FREAK **only computes descriptors**; it requires a separate detector (such as **FAST** or **BRISK**) to identify keypoints.
-- **Hamming Distance**: Matching uses bitwise XOR (`cv2.NORM_HAMMING`), executing orders of magnitude faster than floating-point L2 norms!
+Este cuaderno implementa la solución completa de **Image Detection / Classification** utilizando el descriptor binario bio-inspirado **FREAK**:
+- **Entrada**: Una imagen cualquiera.
+- **Salida**: La clase predicha a la que pertenece la imagen (`apples`, `dogs` o `people`).
+
+#### ¿Qué es FREAK y cómo se aplica para clasificar imágenes?
+1. **Descriptor Bio-inspirado**: FREAK emula la fóvea de la retina humana mediante círculos concéntricos de campos receptivos, con alta densidad en el centro y decaimiento hacia la periferia.
+2. **Descriptor Binario de 512 bits (64 bytes)**: Cada bit es el resultado de una comparación de intensidades filtradas entre pares de campos receptivos.
+3. **Detector Rápido FAST**: Dado que FREAK es exclusivamente un descriptor (no detecta puntos clave), se acopla con el detector ultra-rápido de esquinas FAST (`cv2.FastFeatureDetector_create`).
+4. **Bolsa de Palabras Visuales (BoVW)**: Los descriptores binarios se agrupan en un vocabulario visual ($k = 150$) mediante K-Means para generar histogramas de frecuencias normalizados por imagen y clasificar con SVM.
 """),
 
     code_cell("""import cv2
@@ -342,120 +312,109 @@ from pathlib import Path
 from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
 
 from dataset import load_split
-from freak_pipeline import FREAKBoVWPipeline, FREAKFeatureMatcher
+from freak_pipeline import FREAKBoVWPipeline
 
-def show_rgb(img, title=None):
-    if len(img.shape) == 3:
-        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    else:
-        img_rgb = img
-    plt.figure(figsize=(7, 7))
+def show_image(img, title=None):
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) if len(img.shape) == 3 else img
+    plt.figure(figsize=(5, 5))
     plt.imshow(img_rgb)
     plt.axis('off')
     if title:
-        plt.title(title, fontsize=12)
+        plt.title(title, fontsize=12, fontweight='bold')
     plt.show()
 """),
 
-    md_cell("""## Step 1: Detect Keypoints with FAST and Compute FREAK Descriptors"""),
+    md_cell("""## Paso 1: Carga de Datos y Detección de Puntos Clave FAST + FREAK"""),
 
     code_cell("""train_imgs, train_lbls, classes, _ = load_split("train")
 test_imgs, test_lbls, _, _ = load_split("test")
 
-# FAST detector + FREAK descriptor
+# Detector FAST + Extractor FREAK
 fast = cv2.FastFeatureDetector_create(threshold=25, nonmaxSuppression=True)
 freak = cv2.xfeatures2d.FREAK_create()
 
 sample_img = train_imgs[10]
 gray = cv2.cvtColor(sample_img, cv2.COLOR_BGR2GRAY)
 kps = fast.detect(gray, None)
+kps = sorted(kps, key=lambda k: k.response, reverse=True)[:300]
 kps, descs = freak.compute(gray, kps)
 
-print(f"FAST Detected: {len(kps)} keypoints")
-print(f"FREAK Descriptors Shape: {descs.shape} (dtype: {descs.dtype})")
-print(f"Descriptor bit length: {descs.shape[1] * 8} bits (64 bytes)")
+print(f"Puntos clave FAST detectados: {len(kps)}")
+print(f"Dimensión del descriptor FREAK: {descs.shape} (uint8, 64 bytes = 512 bits)")
 
 img_kps = cv2.drawKeypoints(sample_img, kps, None, color=(0, 255, 255), flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
-show_rgb(img_kps, title="FAST Keypoints + FREAK Bio-Inspired Retinal Descriptors")
+show_image(img_kps, title="FAST Keypoints + FREAK Bio-Inspired Retinal Descriptors")
 """),
 
-    md_cell("""## Step 2: Method A - FREAK Bag of Visual Words (BoVW) for Object Identification"""),
+    md_cell("""## Paso 2: Creación del Vocabulario Visual y Entrenamiento de FREAK BoVW"""),
 
     code_cell("""freak_bovw = FREAKBoVWPipeline(detector_type="fast", max_keypoints=300, vocab_size=150)
-print("Training FREAK BoVW Pipeline...")
+print("Construyendo vocabulario visual FREAK y entrenando clasificador SVM...")
 info = freak_bovw.train(train_imgs, train_lbls, C=1.0)
-print(f"Trained in {info['train_time_sec']:.2f} seconds!")
+print(f"Entrenamiento completado en {info['train_time_sec']:.2f} segundos!")
+print(f"Vocabulario visual: {info['vocab_size']} palabras visuales")
 """),
 
-    md_cell("""## Step 3: Evaluate FREAK BoVW on Full Test Set"""),
+    md_cell("""## Paso 3: Evaluación en el Conjunto de Prueba"""),
 
     code_cell("""eval_res = freak_bovw.evaluate(test_imgs, test_lbls)
-print(f"FREAK BoVW Test Accuracy: {eval_res['accuracy'] * 100:.2f}%")
-print(f"Average Inference Latency: {eval_res['avg_time_per_image_ms']:.2f} ms/image\n")
+print(f"Exactitud en Prueba FREAK BoVW (Accuracy): {eval_res['accuracy'] * 100:.2f}%")
+print(f"Latencia promedio por imagen:              {eval_res['avg_time_per_image_ms']:.2f} ms/imagen\n")
+print("Reporte de Clasificación por Clase:")
 print(classification_report(test_lbls, eval_res['predictions'], target_names=freak_bovw.classes_))
 
-# Plot confusion matrix
+# Matriz de confusión
 cm = np.array(eval_res["confusion_matrix"])
 fig, ax = plt.subplots(figsize=(6, 5))
 im = ax.imshow(cm, cmap="Oranges")
 ax.set_xticks(range(len(classes)))
 ax.set_yticks(range(len(classes)))
-ax.set_xticklabels(classes)
-ax.set_yticklabels(classes)
-plt.xlabel("Predicted Class")
-plt.ylabel("True Class")
-plt.title("FREAK BoVW Confusion Matrix")
+ax.set_xticklabels(classes, fontsize=11)
+ax.set_yticklabels(classes, fontsize=11)
+plt.xlabel("Clase Predicha", fontsize=11)
+plt.ylabel("Clase Real", fontsize=11)
+plt.title("Matriz de Confusión FREAK + BoVW", fontsize=12, fontweight='bold')
 for i in range(len(classes)):
     for j in range(len(classes)):
-        ax.text(j, i, str(cm[i, j]), ha="center", va="center", color="blue" if i != j else "black")
+        ax.text(j, i, str(cm[i, j]), ha="center", va="center", color="red" if i != j else "black", fontweight='bold')
 plt.colorbar(im)
+plt.tight_layout()
 plt.show()
 """),
 
-    md_cell("""## Step 4: Method B - Binary Feature Matching (cv2.NORM_HAMMING) & Homography Detection"""),
+    md_cell("""## Paso 4: Demostración de Clasificación en Imágenes Individuales"""),
 
-    code_cell("""freak_matcher = FREAKFeatureMatcher(detector_type="fast", max_keypoints=500, ratio_thresh=0.80)
+    code_cell("""import random
 
-f0 = cv2.imread("../data/train/people/02022_0954.MOV_Bielsko-Biała_Pride_frame_000.jpg")
-f1 = cv2.imread("../data/train/people/02022_0954.MOV_Bielsko-Biała_Pride_frame_001.jpg")
-
-loc_res = freak_matcher.localize_object(f0, f1, min_inliers=10)
-print(f"Hamming Matches: {loc_res['num_matches']} | Verified Inliers: {loc_res['num_inliers']} | Object Detected: {loc_res['detected']}")
-
-if loc_res['detected']:
-    scene_annotated = f1.copy()
-    pts = np.int32(loc_res['dst_corners']).reshape(-1, 1, 2)
-    cv2.polylines(scene_annotated, [pts], True, (255, 128, 0), 4, cv2.LINE_AA)
-
-    matches_img = cv2.drawMatches(
-        f0, loc_res['kp_template'],
-        scene_annotated, loc_res['kp_scene'],
-        loc_res['good_matches'][:30], None,
-        flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS
-    )
-    show_rgb(matches_img, title=f"FREAK Hamming Matching & Object Localization ({loc_res['num_inliers']} Inliers)")
+for _ in range(3):
+    idx = random.randrange(len(test_imgs))
+    img = test_imgs[idx]
+    true_label = test_lbls[idx]
+    
+    pred_label = freak_bovw.predict([img])[0]
+    show_image(img, title=f"Real: {true_label.upper()} | Predicción FREAK: {pred_label.upper()}")
 """),
 
-    md_cell("""## Step 5: Save FREAK Model"""),
+    md_cell("""## Paso 5: Guardado del Modelo"""),
 
     code_cell("""freak_bovw.save_model("freak_bovw_model.pkl")
 sz = Path("freak_bovw_model.pkl").stat().st_size / (1024 * 1024)
-print(f"Saved FREAK Model: freak_bovw_model.pkl ({sz:.2f} MB)")
+print(f"Modelo guardado: freak_bovw_model.pkl ({sz:.2f} MB)")
 """)
 ]
 
 
 # ==============================================================================
-# Notebook 4: Unified Comparison and Detection
+# Notebook 4: Unified Comparison
 # ==============================================================================
 comp_cells = [
-    md_cell("""# 4. Method Comparison & Object Detection Benchmark
-### Comprehensive Evaluation of HOG vs SIFT vs FREAK
+    md_cell("""# 4. Comparación de Desempeño: HOG vs SIFT vs FREAK
+### Evaluación Comparativa en la Tarea de Image Detection / Classification
 
-This notebook presents a direct, head-to-head comparison between the three OpenCV feature methods:
-1. **HOG (Histogram of Oriented Gradients)**: Dense gradient orientation representation.
-2. **SIFT (Scale-Invariant Feature Transform)**: Sparse multi-scale floating-point keypoint descriptors.
-3. **FREAK (Fast Retina Keypoint)**: Bio-inspired binary foveal descriptor.
+En este cuaderno se comparan frente a frente los tres métodos en la tarea de **Image Detection (Clasificación de Imágenes: dada una imagen, decir a qué clase pertenece)** sobre el mismo conjunto de prueba de 140 imágenes:
+1. **HOG + SVM**
+2. **SIFT + BoVW + SVM**
+3. **FREAK + BoVW + SVM**
 """),
 
     code_cell("""import json
@@ -463,13 +422,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-# Load benchmark results generated by evaluate_all.py
-summary_path = Path("benchmark_summary.json")
-if not summary_path.exists():
-    from evaluate_all import run_benchmark
-    run_benchmark()
-
-with open(summary_path, "r") as f:
+# Cargar resumen numérico del benchmark
+with open("benchmark_summary.json", "r") as f:
     results = json.load(f)
 
 methods = list(results.keys())
@@ -479,77 +433,69 @@ fps_vals = [results[m]["Throughput (FPS)"] for m in methods]
 sizes = [results[m]["Model Size (MB)"] for m in methods]
 
 print("=" * 80)
-print(f"{'Method':<8} | {'Accuracy':<12} | {'Latency (ms)':<14} | {'FPS':<10} | {'Model Size':<10}")
+print(f"{'Método':<8} | {'Exactitud':<12} | {'Latencia (ms)':<14} | {'FPS':<10} | {'Tamaño Modelo':<12}")
 print("-" * 80)
 for m in methods:
-    print(f"{m:<8} | {results[m]['Accuracy (%)']:>10.2f}% | {results[m]['Latency (ms/img)']:>12.2f} ms | {results[m]['Throughput (FPS)']:>10.1f} | {results[m]['Model Size (MB)']:>8.2f} MB")
+    print(f"{m:<8} | {results[m]['Accuracy (%)']:>10.2f}% | {results[m]['Latency (ms/img)']:>12.2f} ms | {results[m]['Throughput (FPS)']:>10.1f} | {results[m]['Model Size (MB)']:>10.2f} MB")
 print("=" * 80)
 """),
 
-    md_cell("""## Visual Comparison Charts"""),
+    md_cell("""## Gráficas Comparativas de Rendimiento"""),
 
-    code_cell("""fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+    code_cell("""fig, axes = plt.subplots(1, 3, figsize=(15, 4.5))
+colors = ['#1f77b4', '#9467bd', '#ff7f0e']
 
-# 1. Accuracy
-colors = ['#2b5c8f', '#6c4b8b', '#d95f02']
-axes[0].bar(methods, accuracies, color=colors)
-axes[0].set_title("Test Accuracy (%)", fontsize=13)
+# 1. Exactitud
+axes[0].bar(methods, accuracies, color=colors, width=0.55)
+axes[0].set_title("Exactitud en Prueba (%)", fontsize=12, fontweight='bold')
 axes[0].set_ylim(0, 100)
+axes[0].grid(axis='y', linestyle='--', alpha=0.5)
 for i, v in enumerate(accuracies):
-    axes[0].text(i, v + 2, f"{v:.1f}%", ha='center', fontweight='bold')
+    axes[0].text(i, v + 2, f"{v:.2f}%", ha='center', fontweight='bold')
 
-# 2. Latency / Inference Time
-axes[1].bar(methods, latencies, color=colors)
-axes[1].set_title("Inference Latency (ms / image)", fontsize=13)
+# 2. Latencia
+axes[1].bar(methods, latencies, color=colors, width=0.55)
+axes[1].set_title("Latencia de Inferencia (ms/imagen)", fontsize=12, fontweight='bold')
+axes[1].grid(axis='y', linestyle='--', alpha=0.5)
 for i, v in enumerate(latencies):
-    axes[1].text(i, v + 0.5, f"{v:.2f} ms", ha='center', fontweight='bold')
+    axes[1].text(i, v + 0.8, f"{v:.2f} ms", ha='center', fontweight='bold')
 
-# 3. Model Size
-axes[2].bar(methods, sizes, color=colors)
-axes[2].set_title("Model File Footprint (MB)", fontsize=13)
+# 3. Tamaño del Modelo
+axes[2].bar(methods, sizes, color=colors, width=0.55)
+axes[2].set_title("Tamaño del Modelo (MB)", fontsize=12, fontweight='bold')
+axes[2].grid(axis='y', linestyle='--', alpha=0.5)
 for i, v in enumerate(sizes):
-    axes[2].text(i, v + 1, f"{v:.2f} MB", ha='center', fontweight='bold')
+    axes[2].text(i, v + 0.9, f"{v:.2f} MB", ha='center', fontweight='bold')
 
 plt.tight_layout()
 plt.show()
 """),
 
-    md_cell("""## Visualizing Object Detection Demos (SIFT vs FREAK)"""),
+    md_cell("""## Visualización de Muestras Clasificadas por los Tres Descriptores"""),
 
     code_cell("""import cv2
 
-sift_demo = Path("visualizations/sift_detection_demo.jpg")
-freak_demo = Path("visualizations/freak_detection_demo.jpg")
-
-if sift_demo.exists() and freak_demo.exists():
-    fig, axes = plt.subplots(1, 2, figsize=(16, 8))
-    im_s = cv2.cvtColor(cv2.imread(str(sift_demo)), cv2.COLOR_BGR2RGB)
-    im_f = cv2.cvtColor(cv2.imread(str(freak_demo)), cv2.COLOR_BGR2RGB)
-
-    axes[0].imshow(im_s)
-    axes[0].set_title("SIFT Object Detection & Homography Bounding Box", fontsize=12)
-    axes[0].axis("off")
-
-    axes[1].imshow(im_f)
-    axes[1].set_title("FREAK Binary Object Detection & Homography Bounding Box", fontsize=12)
-    axes[1].axis("off")
-
+pred_demo_path = Path("visualizations/classification_predictions_demo.png")
+if pred_demo_path.exists():
+    img_demo = cv2.imread(str(pred_demo_path))
+    plt.figure(figsize=(15, 10))
+    plt.imshow(cv2.cvtColor(img_demo, cv2.COLOR_BGR2RGB))
+    plt.axis("off")
+    plt.title("Ejemplos de Clasificación de Imágenes (Dada una imagen -> Clase predicha)", fontsize=13, fontweight='bold')
     plt.tight_layout()
     plt.show()
 """),
 
-    md_cell("""## Architectural Summary & Decision Matrix
+    md_cell("""## Resumen Comparativo de Arquitectura para Clasificación de Imágenes
 
-| Dimension | HOG | SIFT | FREAK |
+| Dimensión | HOG + Linear SVM | SIFT + BoVW + SVM | FREAK + BoVW + SVM |
 | :--- | :--- | :--- | :--- |
-| **Descriptor Type** | Dense gradient orientations (8,100 floats) | Sparse keypoints (128 floats / point) | Sparse keypoints (64 bytes / point) |
-| **Keypoint Detector** | None (dense grid) | Built-in DoG (Difference of Gaussians) | External (FAST, BRISK, AGAST) |
-| **Distance Metric** | L2 / Linear Hyperplane | L2 Norm | Hamming Distance (bitwise XOR) |
-| **Classification Accuracy**| **84.29%** (Best on global shape) | 70.00% (BoVW) | 71.43% (BoVW) |
-| **Inference Speed** | **0.73 ms** (~1,370 FPS) | 35.34 ms (~28 FPS) | **2.93 ms** (~340 FPS, 12x faster than SIFT!) |
-| **Model Size** | 39.38 MB | 0.21 MB | **0.17 MB** |
-| **Invariance** | Illumination, local edge gradients | Scale, Rotation, Illumination | Scale, Rotation, Illumination |
-| **Best Use Case** | Whole-image category classification & pedestrian/rigid object sliding window | High-precision instance recognition under severe scale/rotation | Real-time / mobile / embedded object detection & SLAM tracking |
+| **Representación de la Imagen** | Vector global denso de gradientes ($128 \\times 128$) | Histograma BoVW ($150$ palabras visuales) | Histograma BoVW ($150$ palabras visuales) |
+| **Dimensión por Imagen** | 8,100 valores flotantes | 150 valores flotantes | 150 valores flotantes |
+| **Exactitud en Prueba** | **84.29%** | 70.00% | 71.43% |
+| **Velocidad de Inferencia** | **0.73 ms** (1,377 FPS) | 35.34 ms (28 FPS) | **2.93 ms** (341 FPS, **12x más rápido que SIFT**) |
+| **Tamaño del Modelo** | 39.38 MB | 0.21 MB | **0.17 MB** |
+| **Fortaleza Principal** | Preserva la distribución espacial global de siluetas | Invarianza a escala y rotación de puntos locales | Velocidad extrema con bajo consumo de memoria y CPU |
 """)
 ]
 
@@ -558,4 +504,6 @@ if __name__ == "__main__":
     create_notebook(hog_cells, out_dir / "1_hog.ipynb")
     create_notebook(sift_cells, out_dir / "2_sift.ipynb")
     create_notebook(freak_cells, out_dir / "3_freak.ipynb")
+    create_notebook(comp_cells, out_dir / "4_comparison.ipynb")
+    # Also overwrite the old 4_comparison_and_detection.ipynb for backward compatibility
     create_notebook(comp_cells, out_dir / "4_comparison_and_detection.ipynb")
