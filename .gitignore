@@ -1,4 +1,7 @@
 .venv/
+
 *.jpg
 *.png
 *.jpeg
+
+*.pyc
